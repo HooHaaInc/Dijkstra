@@ -1,81 +1,115 @@
-
 DROP TABLE IF EXISTS Nodo;
 CREATE TABLE Nodo (
-  id_nodo int(11) NOT NULL AUTO_INCREMENT,
-  name varchar(1) NOT NULL,
+  id_nodo varchar(1) NOT NULL,
   PRIMARY KEY (id_nodo)
 );
 
+  
 DROP TABLE IF EXISTS Arista;
 CREATE TABLE Arista (
   id_arista int(11) NOT NULL AUTO_INCREMENT,
-  nodo_a int(11) NOT NULL,
-  nodo_b int(11) NOT NULL,
-  peso int(11) NOT NULL,
+  nodo_a char(1) NOT NULL,
+  nodo_b char(1) NOT NULL,
+  costo int(11) NOT NULL,
   PRIMARY KEY (id_arista)
 );
 
+DROP PROCEDURE IF EXISTS dijkstra;
 
-CREATE FUNCTION dijkstra(startNode INT,endNode INT)
-RETURNS INT
+DELIMITER //
+CREATE PROCEDURE dijkstra (startNode CHAR,endNode CHAR)
 BEGIN
-  DECLARE paso INT DEFAULT 0;   
-  CREATE TEMPORARY TABLE plan(
-    paso int(11) NOT NULL,
-    donde_viene int(11) NOT NULL,
-    nodo int(11) NOT NULL,
-    costo int(11) NOT NULL,
-    FOREIGN KEY (donde_viene) REFERENCES Nodo(id_nodo),
-    FOREIGN KEY (nodo) REFERENCES Nodo(id_nodo)
+  DECLARE paso,costo,costoHijo,costoAux INT DEFAULT 0;
+  DECLARE nodoActual,papi,hijoActual CHAR;
+  SET nodoActual = startNode; 
+  
+  DROP TABLE IF EXISTS plan;
+  CREATE TEMPORARY TABLE plan (
+    #paso int(11) NOT NULL,
+    seleccionado boolean DEFAULT FALSE,
+    dondeViene char(1) DEFAULT NULL,
+    nodo char(1) NOT NULL,
+    costo int(11) NOT NULL DEFAULT 1024
   );
-
+  
+  DROP TABLE IF EXISTS camino; 
   CREATE TEMPORARY TABLE camino(
-    id int(11) NOT NULL,
-    nombre varchar(25) NOT NULL,
-    costo int(11) NOT NULL,
-    PRIMARY KEY (id)
+    de char(1) NOT NULL,
+    a char(1) NOT NULL,
+    costo int(11) NOT NULL
   );
-
-  INSERT INTO plan VALUES (0,-1, startNode,0);
-
   
-  
-  INSERT INTO camino (nombre,costo) VALUES (startNode,0);
   
   BEGIN
-      DECLARE nodoActual INT;
-      DECLARE papi INT;  
-      DECLARE costo INT;
-      DECLARE pasoActual INT;  
-      set nodoActual = StarNode;
-
-      DECLARE hijoActual INT;
-      DECLARE costoHijo int;  
-  END  
-
-  WHILE nodoActual != endNode DO
-    DECLARE nodos CURSOR FOR SELECT * FROM 'plan' WHERE 'paso' = paso AND 'nodo' = nodoActual;
-    LOOP
-      FETCH nodos INTO pasoActual, papi, nodoActual, costo;
-      DECLARE hijos CURSOR FOR SELECT 'nodo_b', 'costo' FROM 'Arista' WHERE 'nodo_a' = nodoActual;
-      
-      LOOP
-        FETCH hijos INTO hijoActual, costoHijo;
-        INSERT INTO plan VALUES (paso+1, nodoActual, hijoActual, costo+costoHijo);
-      END LOOP
-    END LOOP  
-    DECLARE nodos2 CURSOR FOR SELECT * FROM 'plan' WHERE 'paso' = paso AND 'nodo' != nodoActual;
-    LOOP
-      FETCH nodos2 INTO pasoActual, papi, nodoActual, costo;
-      INSERT INTO plan VALUES (pasoActual+1, papi, nodoActual, costo);
-
+    DECLARE nodoName CHAR;
+    DECLARE initListo INT DEFAULT FALSE;
+    DECLARE init CURSOR FOR SELECT Nodo.id_nodo FROM Nodo 
+        WHERE Nodo.id_nodo != startNode;
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET initListo = TRUE;
+    INSERT INTO plan (plan.seleccionado, plan.nodo, plan.costo) 
+      VALUES(TRUE, startNode, 0);
+    OPEN init;
+    loopinit: LOOP
+      FETCH NEXT FROM init INTO nodoName;
+      IF initListo THEN
+          LEAVE loopinit;
+      END IF;
+      INSERT INTO plan (plan.nodo) VALUES (nodoName);
     END LOOP;
-    DECLARE mejor CURSOR FOR SELECT 'nodo', 'costo' FROM 'plan' WHERE 'paso' = paso ORDER BY 'costo';
-
-    FETCH mejor INTO nodoActual,costo;
-
-    INSERT INTO camino (nombre,costo) VALUES (nodoActual,costo);
-
-  END
-
-END
+    CLOSE init;
+  END;
+  
+  #nomas por si se cicla
+  guail: WHILE paso < 10000 DO
+    #sacamos los datos del nodo actual
+    SELECT plan.dondeViene, plan.costo FROM plan WHERE plan.nodo = nodoActual
+      INTO papi, costo;
+    BEGIN
+      DECLARE hijosListo INT DEFAULT FALSE;
+      DECLARE costoViejo INT;
+      #hijos del nodo
+      DECLARE hijos CURSOR FOR SELECT Arista.nodo_b, Arista.costo FROM Arista 
+        WHERE Arista.nodo_a = nodoActual;
+      DECLARE CONTINUE HANDLER FOR NOT FOUND SET hijosListo = TRUE;
+      OPEN hijos;
+      loopinsert: LOOP              
+        FETCH NEXT FROM hijos INTO hijoActual, costoHijo;    
+        IF hijosListo THEN
+          LEAVE loopinsert;
+        END IF;
+        SELECT plan.costo FROM plan WHERE plan.nodo = hijoActual INTO costoViejo;
+        #solo update si es mejor
+        IF costoViejo > costoHijo+costo THEN
+          UPDATE plan SET plan.dondeViene =  nodoActual,
+            plan.costo = costo+costoHijo
+            WHERE plan.nodo = hijoActual;
+        END IF;
+      END LOOP;
+      CLOSE hijos;
+    END;  
+    
+  SET paso = paso+1;
+  BEGIN
+    DECLARE nextCursor CURSOR FOR SELECT plan.dondeViene, plan.nodo, plan.costo FROM plan 
+      WHERE plan.seleccionado = FALSE ORDER BY plan.costo;
+    OPEN nextCursor;
+    FETCH NEXT FROM nextCursor INTO papi, nodoActual, costo;
+    CLOSE nextCursor;
+    UPDATE plan SET plan.seleccionado = TRUE WHERE plan.nodo = nodoActual;
+    IF nodoActual = endNode THEN
+      LEAVE guail;
+    END IF;
+  END;
+  END WHILE;  
+  
+  WHILE nodoActual != startNode DO
+    SELECT plan.dondeViene, plan.costo FROM plan 
+      WHERE plan.nodo = nodoActual INTO papi, costo;
+    INSERT INTO camino VALUES (papi, nodoActual, costo);
+    SET nodoActual = papi;
+  END WHILE;
+    
+  SELECT * FROM plan;
+  SELECT * FROM camino ORDER BY camino.costo;
+END//
+DELIMITER ;
